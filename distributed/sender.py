@@ -8,7 +8,7 @@ import time
 def sender_start():
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect(('localhost', 9999))
+    #client_socket.connect(('localhost', 9999))
 
     cap = cv2.VideoCapture(0)
 
