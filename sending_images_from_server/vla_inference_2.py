@@ -123,38 +123,21 @@ if __name__ == "__main__":
 
 def start_vla_inference(processor, image, instruction, model):
 
-    if image is None or instruction is None:
-        print("No image or instruction received. Skipping VLA inference.")
-        return
-    
-    #TODO: Need to pass the current joint angles from the receiver to the VLA inference code in order to get the correct action outputs. 
-    #For now we can just use a dummy value since the IK isn't working well and we want to focus on the VLA part first.
+    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    model = load_model()
     #current_joints = np.zeros(5)
 
     print(f"  Instruction: {instruction}")
     print(f"  Images: {len(image_paths)}")
 
-    #for i, path in enumerate(image_paths):
-    image = image.convert("RGB")
-    prompt = f"In: What action should the robot take to {instruction}?\nOut:"
-    inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
+    for i, path in enumerate(image_paths):
+        image = image.convert("RGB")
+        prompt = f"In: What action should the robot take to {instruction}?\nOut:"
+        inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
 
-    with torch.inference_mode():
-        action = model.predict_action(**inputs, unnorm_key=UNNORM_KEY, do_sample=False)
-        print(action)
+        with torch.inference_mode():
+            action = model.predict_action(**inputs, unnorm_key=UNNORM_KEY, do_sample=False)
+            print(action)
 
-
-def load_items():
-    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
-    model = load_model()
-
-    # Receive the frames from the sender and instructions.
-
-    image = None # Placeholder for the received image from the sender.
-    instruction = None # Placeholder for the received instruction from the sender.
-
-    start_vla_inference(processor, image, instruction, model)
-
-#TODO:
 # Call from the receiver after passing the received image and instruction from the sender. 
 #The rest of the code can be adapted from the run() function above, but for now we can just print the action to verify that the VLA inference is working end-to-end.
