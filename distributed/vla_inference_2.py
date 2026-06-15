@@ -2,6 +2,7 @@ import argparse
 import glob
 import numpy as np
 import torch
+import cv2
 from PIL import Image
 from transformers import AutoModelForVision2Seq, AutoProcessor
 
@@ -121,21 +122,21 @@ if __name__ == "__main__":
     main()
 '''
 
-def start_vla_inference(processor, image, instruction, model):
+def start_vla_inference(processor, model, frame, instruction):
 
-    if image is None or instruction is None:
-        print("No image or instruction received. Skipping VLA inference.")
+    if frame is None or instruction is None:
+        print("No frame or instruction received. Skipping VLA inference.")
         return
     
     #TODO: Need to pass the current joint angles from the receiver to the VLA inference code in order to get the correct action outputs. 
     #For now we can just use a dummy value since the IK isn't working well and we want to focus on the VLA part first.
     #current_joints = np.zeros(5)
 
-    print(f"  Instruction: {instruction}")
-    print(f"  Images: {len(image_paths)}")
+    #print(f"  Instruction: {instruction}")
+    #print(f"  Images: {len(image_paths)}")
 
     #for i, path in enumerate(image_paths):
-    image = image.convert("RGB")
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))    
     prompt = f"In: What action should the robot take to {instruction}?\nOut:"
     inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
 
@@ -143,17 +144,19 @@ def start_vla_inference(processor, image, instruction, model):
         action = model.predict_action(**inputs, unnorm_key=UNNORM_KEY, do_sample=False)
         print(action)
 
-
 def load_items():
     processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
     model = load_model()
 
+    return processor, model
+
+    print("Received image and instruction. Starting VLA inference...")
     # Receive the frames from the sender and instructions.
 
-    image = None # Placeholder for the received image from the sender.
-    instruction = None # Placeholder for the received instruction from the sender.
+    #image = None # Placeholder for the received image from the sender.
+    #instruction = None # Placeholder for the received instruction from the sender.
 
-    start_vla_inference(processor, image, instruction, model)
+    start_vla_inference(processor, model, image, instruction)
 
 #TODO:
 # Call from the receiver after passing the received image and instruction from the sender. 
