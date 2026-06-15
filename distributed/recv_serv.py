@@ -4,7 +4,7 @@ import numpy as np
 from time import sleep
 import socket, struct, pickle, time
 
-from vla_inference_1 import load_items, start_vla_inference
+from vla_inference_2 import load_items, start_vla_inference
 
 payload_size = struct.calcsize("Q")
 
@@ -59,6 +59,9 @@ def receiver_start(ip, port):
                 data_buffer = data_buffer[msg_size:]
 
                 frame = pickle.loads(frame_data)
+
+                #print(f"Frame hash: {do_hash(frame)}")
+
                 start_vla_inference(processor, model, frame, "open the drawer")
         except ConnectionError as e:
             print(f"Disconnected: {e}. Reconnecting...")
@@ -81,3 +84,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#################################################
+# Test - Will be removed.
+#################################################
+
+'''
+import hashlib
+
+def do_hash(data):
+    if hasattr(data, "tobytes"):
+        return hashlib.md5(data.tobytes()).hexdigest()
+    return hashlib.md5(data).hexdigest()
+'''

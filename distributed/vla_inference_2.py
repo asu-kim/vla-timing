@@ -11,6 +11,7 @@ INSTRUCTION = "pick up the nearest object"
 UNNORM_KEY  = "bridge_orig"
 DEVICE      = "cuda:0"
 
+torch.manual_seed(0)
 
 def fk(joints):
     #Placeholder DH parameters for now, need to measure the actual robot and update these.
@@ -59,7 +60,76 @@ def load_model():
     model.eval()
     return model
 
+def start_vla_inference(processor, model, frame, instruction):
+
+    if frame is None or instruction is None:
+        print("No frame or instruction received. Skipping VLA inference.")
+        return
+    
+    #TODO: Need to pass the current joint angles from the receiver to the VLA inference code in order to get the correct action outputs. 
+    #For now we can just use a dummy value since the IK isn't working well and we want to focus on the VLA part first.
+    #current_joints = np.zeros(5)
+    
+    #print(f"  Instruction: {instruction}")
+    #print(f"  Images: {len(image_paths)}")
+
+    #print(f"Frame hash: {do_hash(frame)}")
+    decoded_back = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+    image = Image.fromarray(cv2.cvtColor(decoded_back, cv2.COLOR_BGR2RGB))
+    #print(f"Image hash: {do_hash(image)}")
+
+    #image2 = image.copy()  # Just to verify that the same input gives the same output, since the model should be deterministic with do_sample=False.
+    #print(f"Image2 hash: {do_hash(image2)}")
+
+    prompt = f"In: What action should the robot take to {instruction}?\nOut:"
+    inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
+    #print(f"inputs hash: {do_hash(inputs['pixel_values'].cpu().to(torch.float32).numpy())}")
+    
+    #inputs2 = processor(prompt, image2).to(DEVICE, dtype=torch.bfloat16)
+    #print(f"inputs2 hash: {do_hash(inputs2['pixel_values'].cpu().to(torch.float32).numpy())}")
+    
+    with torch.inference_mode():
+        action1 = model.predict_action(**inputs, unnorm_key=UNNORM_KEY, do_sample=False)
+        #action2 = model.predict_action(**inputs2, unnorm_key=UNNORM_KEY, do_sample=False)
+        print(action1)
+        #print(action2)
+        #print(np.allclose(action1, action2))  # should be True if model itself is deterministic
+        #print(action1 - action2)
+
+def load_items():
+    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    model = load_model()
+
+    return processor, model
+
+    print("Received image and instruction. Starting VLA inference...")
+    # Receive the frames from the sender and instructions.
+
+    #image = None # Placeholder for the received image from the sender.
+    #instruction = None # Placeholder for the received instruction from the sender.
+
+    start_vla_inference(processor, model, image, instruction)
+
+#TODO:
+# Call from the receiver after passing the received image and instruction from the sender. 
+#The rest of the code can be adapted from the run() function above, but for now we can just print the action to verify that the VLA inference is working end-to-end.
+
+################################################
+# Test - Will remove later.
+################################################
+
+
 '''
+
+import hashlib
+
+def do_hash(data):
+    if isinstance(data, torch.Tensor):
+        data = data.cpu().to(torch.float32).numpy()
+    if hasattr(data, "tobytes"):
+        return hashlib.md5(data.tobytes()).hexdigest()
+    return hashlib.md5(data).hexdigest()
+
 def run(image_paths, instruction=INSTRUCTION):
     processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
     model = load_model()
@@ -121,43 +191,3 @@ def main():
 if __name__ == "__main__":    
     main()
 '''
-
-def start_vla_inference(processor, model, frame, instruction):
-
-    if frame is None or instruction is None:
-        print("No frame or instruction received. Skipping VLA inference.")
-        return
-    
-    #TODO: Need to pass the current joint angles from the receiver to the VLA inference code in order to get the correct action outputs. 
-    #For now we can just use a dummy value since the IK isn't working well and we want to focus on the VLA part first.
-    #current_joints = np.zeros(5)
-
-    #print(f"  Instruction: {instruction}")
-    #print(f"  Images: {len(image_paths)}")
-
-    #for i, path in enumerate(image_paths):
-    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))    
-    prompt = f"In: What action should the robot take to {instruction}?\nOut:"
-    inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
-
-    with torch.inference_mode():
-        action = model.predict_action(**inputs, unnorm_key=UNNORM_KEY, do_sample=False)
-        print(action)
-
-def load_items():
-    processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
-    model = load_model()
-
-    return processor, model
-
-    print("Received image and instruction. Starting VLA inference...")
-    # Receive the frames from the sender and instructions.
-
-    #image = None # Placeholder for the received image from the sender.
-    #instruction = None # Placeholder for the received instruction from the sender.
-
-    start_vla_inference(processor, model, image, instruction)
-
-#TODO:
-# Call from the receiver after passing the received image and instruction from the sender. 
-#The rest of the code can be adapted from the run() function above, but for now we can just print the action to verify that the VLA inference is working end-to-end.
