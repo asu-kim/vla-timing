@@ -112,7 +112,6 @@ Action: [-0.024  0.008 -0.003  0.082  0.077  0.032  0.996] ... (as many as there
 | `TIMM Version must be >= 0.9.10 and < 1.0.0` | `pip install "timm>=0.9.10,<1.0.0"` |
 | `no kernel image is available for execution on the device` | You're on the wrong PyTorch build — reinstall with `--index-url .../nightly/cu130` |
 | PyTorch still shows old version after reinstall | Check `which pip` — make sure it points to your venv, not the system Python |
-| `dytpe` TypeError | Typo — use `dtype=` not `dytpe=` |
 | OOM errors | Add `load_in_4bit=True` to `from_pretrained()` and `pip install bitsandbytes` |
 
 ---
