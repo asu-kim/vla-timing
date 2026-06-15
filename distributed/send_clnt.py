@@ -27,7 +27,8 @@ def connect_with_retry(ip, port, delay=2.0):
 
 def receiver_start(ip, port):
 
-    while True:
+    flag = True
+    while flag:
         conn = connect_with_retry(ip, port)
         data_buffer = b""                          # fresh buffer every new connection
     
@@ -41,13 +42,18 @@ def receiver_start(ip, port):
                         print(f"Could not read {filename}, skipping.")
                         continue
                     ok, frame = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+
+                    #print(f"Frame hash: {do_hash(frame)}")
+
                     data = pickle.dumps(frame)
                     message = struct.pack("Q", len(data)) + data   # 8-byte size header + payload
                     conn.sendall(message)
                 else:
                     print(f"Skipping {filename}.")
+            flag = False
         except KeyboardInterrupt:
             print("Sender is shutting down.")
+            flag = False
         finally:
             conn.close()
 
@@ -61,3 +67,18 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+#################################################
+# Test - Will be removed.
+#################################################
+
+'''
+import hashlib
+
+def do_hash(data):
+    if hasattr(data, "tobytes"):
+        return hashlib.md5(data.tobytes()).hexdigest()
+    return hashlib.md5(data).hexdigest()
+
+'''
