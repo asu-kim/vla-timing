@@ -1,0 +1,166 @@
+// keepalive is needed so the runtime doesn't exit before NetworkClient's
+// background thread has a chance to schedule its first physical action.
+target Python {
+  keepalive: true
+}
+
+preamble {=
+  import cv2
+  import pickle
+  import socket
+  import struct
+  import time
+  import os
+  import re
+  import threading
+  import csv
+
+  payload_size = struct.calcsize("Q")
+
+  def natural_key(s):
+      return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
+
+  def recv_exactly(conn, n, buf):
+      """Read until buf has >= n bytes. Returns (buf, ok); ok=False if the receiver closed."""
+      while len(buf) < n:
+          chunk = conn.recv(4096)
+          if not chunk:
+              return buf, False
+          buf += chunk
+      return buf, True
+
+  def connect_with_retry(ip, port, delay=2.0):
+      """Keep trying until the receiver is reachable. Handles "Connection refused"."""
+      while True:
+          try:
+              conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+              conn.connect((ip, port))
+              print(f"Connected to {ip}:{port}.")
+              return conn
+          except OSError as e:                       # ConnectionRefusedError is a subclass
+              print(f"Connect failed ({e.__class__.__name__}); retrying in {delay:.0f}s...")
+              time.sleep(delay)
+=}
+
+reactor FrameSource(folder="images") {
+  output frame_out
+
+  input ack_in
+
+  state files
+  state idx = 0
+
+  reaction(startup) {=
+    all_files = sorted(os.listdir(self.folder), key=natural_key)
+    self.files = [f for f in all_files if f.endswith(".jpg")]
+    print(f"[FrameSource] Found {len(self.files)} frame(s) in '{self.folder}'.")
+  =}
+
+  reaction(startup, ack_in) -> frame_out {=
+    if self.idx >= len(self.files):
+        print("[FrameSource] All frames sent." if self.idx > 0 else "[FrameSource] No frames to send.")
+        request_stop()
+        return
+
+    filename = self.files[self.idx]
+    self.idx += 1
+
+    image = cv2.imread(os.path.join(self.folder, filename))
+    if image is None:
+        print(f"[FrameSource] Could not read {filename}, skipping.")
+        return
+
+    ok, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    if not ok:
+        print(f"[FrameSource] Failed to encode {filename}, skipping.")
+        return
+
+    print(f"[FrameSource] Sending {filename} ({self.idx}/{len(self.files)}).")
+    frame_out.set((filename, buf))
+  =}
+}
+
+reactor NetworkClient(ip="10.218.100.78", port=8080, csv_path="timing_log.csv") {
+  input frame_in
+  output action_out
+  physical action action_received
+
+  state conn
+  state csv_file
+  state csv_writer
+
+  reaction(startup) {=
+    self.conn = connect_with_retry(self.ip, self.port)
+
+    self.csv_file = open(self.csv_path, "w", newline="")
+    self.csv_writer = csv.writer(self.csv_file)
+    self.csv_writer.writerow(["filename", "elapsed_s", "lag_ms"])
+  =}
+
+  reaction(frame_in) -> action_received {=
+    filename, buf = frame_in.value
+    conn = self.conn
+
+    def round_trip():
+        data = pickle.dumps(buf)
+        message = struct.pack("Q", len(data)) + data
+
+        send_time = time.time()
+        conn.sendall(message)
+
+        data_buffer = b""
+        data_buffer, ok = recv_exactly(conn, payload_size, data_buffer)
+        if not ok:
+            print("Receiver closed the connection before replying; stopping.")
+            return
+        action_size = struct.unpack("Q", data_buffer[:payload_size])[0]
+        data_buffer = data_buffer[payload_size:]
+
+        data_buffer, ok = recv_exactly(conn, action_size, data_buffer)
+        if not ok:
+            print("Receiver closed the connection mid-action; stopping.")
+            return
+        action_data = data_buffer[:action_size]
+        action = pickle.loads(action_data)
+        elapsed = time.time() - send_time
+
+        action_received.schedule(0, (filename, action, elapsed))
+
+    threading.Thread(target=round_trip, daemon=True).start()
+  =}
+
+  reaction(action_received) -> action_out {=
+    filename, action, elapsed = action_received.value
+    lag_ms = (lf.time.physical() - lf.time.logical()) / 1e6
+    print(f"  physical-logical lag: {lag_ms:.3f} ms")
+
+    self.csv_writer.writerow([filename, f"{elapsed:.6f}", f"{lag_ms:.6f}"])
+    self.csv_file.flush()
+
+    action_out.set(action_received.value)
+  =}
+
+  reaction(shutdown) {=
+    self.conn.close()
+    self.csv_file.close()
+  =}
+}
+
+reactor ActionSink {
+  input action_in
+
+  reaction(action_in) {=
+    filename, action, elapsed = action_in.value
+    print(f"Action for {filename} received after {elapsed:.3f}s: {action}")
+  =}
+}
+
+main reactor(ip="10.218.100.78", port=8080, folder="images", csv_path="timing_log.csv") {
+  source  = new FrameSource(folder=folder)
+  client  = new NetworkClient(ip=ip, port=port, csv_path=csv_path)
+  sink    = new ActionSink()
+
+  source.frame_out -> client.frame_in
+  client.action_out -> sink.action_in
+  client.action_out -> source.ack_in after 1 msec
+}

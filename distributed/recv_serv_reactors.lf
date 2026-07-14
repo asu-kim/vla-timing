@@ -1,0 +1,130 @@
+// keepalive is needed so the runtime doesn't exit once the event queue
+// looks empty -- it must keep waiting for the listener thread's next
+// physical-action schedule() call.
+target Python {
+  files: ["vla_inference_2.py"],
+  keepalive: true
+}
+
+preamble {=
+  import socket, struct, pickle, threading, csv
+  from vla_inference_2 import load_items, start_vla_inference
+
+  payload_size = struct.calcsize("Q")
+
+  def recv_exactly(conn, n, buf):
+      """Read until buf has >= n bytes. Returns (buf, ok); ok=False if the sender closed."""
+      while len(buf) < n:
+          chunk = conn.recv(4096)
+          if not chunk:
+              return buf, False
+          buf += chunk
+      return buf, True
+=}
+
+reactor FrameListener(ip="10.218.100.78", port=8080) {
+  output frame_out
+  physical action frame_received
+
+  reaction(startup) -> frame_received {=
+    def serve():
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((self.ip, self.port))
+        server_socket.listen(5)
+        print(f"Listening on {self.ip}:{self.port}. Waiting for sender to connect...")
+
+        while True:
+            conn, addr = server_socket.accept()
+            print(f"Connected from {addr}. Receiving frames...")
+            data_buffer = b""
+            try:
+                while True:
+                    data_buffer, ok = recv_exactly(conn, payload_size, data_buffer)
+                    if not ok:
+                        raise ConnectionError("sender closed")
+                    msg_size = struct.unpack("Q", data_buffer[:payload_size])[0]
+                    data_buffer = data_buffer[payload_size:]
+
+                    data_buffer, ok = recv_exactly(conn, msg_size, data_buffer)
+                    if not ok:
+                        raise ConnectionError("sender closed mid-frame")
+                    print(f"Received frame of size {msg_size} bytes.")
+                    frame_data = data_buffer[:msg_size]
+                    data_buffer = data_buffer[msg_size:]
+
+                    frame = pickle.loads(frame_data)
+                    # conn travels along with the frame so ActionSender can
+                    # reply on the same socket it arrived on.
+                    frame_received.schedule(0, (conn, frame))
+            except ConnectionError as e:
+                print(f"Disconnected: {e}. Waiting for a new connection...")
+            finally:
+                conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+  =}
+
+  reaction(frame_received) -> frame_out {=
+    frame_out.set(frame_received.value)
+  =}
+}
+
+reactor VLAInference(instruction="open the drawer", csv_path="lag_log.csv") {
+  input frame_in
+  output action_out
+
+  state processor
+  state model
+  state csv_file
+  state csv_writer
+
+  reaction(startup) {=
+    self.processor, self.model = load_items()
+    print("Model loaded. Waiting for frames...")
+
+    self.csv_file = open(self.csv_path, "w", newline="")
+    self.csv_writer = csv.writer(self.csv_file)
+    self.csv_writer.writerow(["lag_ms"])
+  =}
+
+  reaction(frame_in) -> action_out {=
+    conn, frame = frame_in.value
+    action = start_vla_inference(self.processor, self.model, frame, self.instruction)
+
+    lag_ms = (lf.time.physical() - lf.time.logical()) / 1e6
+    print(f"  physical-logical lag: {lag_ms:.3f} ms")
+
+    self.csv_writer.writerow([f"{lag_ms:.6f}"])
+    self.csv_file.flush()
+
+    action_out.set((conn, action))
+  =}
+
+  reaction(shutdown) {=
+    self.csv_file.close()
+  =}
+}
+
+reactor ActionSender {
+  input action_in
+
+  reaction(action_in) {=
+    conn, action = action_in.value
+    action_data = pickle.dumps(action)
+    action_message = struct.pack("Q", len(action_data)) + action_data
+    try:
+        conn.sendall(action_message)
+    except OSError as e:
+        print(f"Failed to send action: {e}")
+  =}
+}
+
+main reactor(ip="10.218.100.78", port=8080, csv_path="lag_log.csv") {
+  listener  = new FrameListener(ip=ip, port=port)
+  inference = new VLAInference(csv_path=csv_path)
+  sender    = new ActionSender()
+
+  listener.frame_out -> inference.frame_in
+  inference.action_out -> sender.action_in
+}
