@@ -46,6 +46,8 @@ print('Kernel test passed:', (x @ x).shape)
 "
 ```
 
+Your GPU is working if you see the message `Kernel test passed`.
+
 ---
 
 ## 3. Install dependencies
