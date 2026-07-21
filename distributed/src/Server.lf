@@ -2,7 +2,7 @@
 // looks empty -- it must keep waiting for the listener thread's next
 // physical-action schedule() call.
 target Python {
-  files: ["vla_inference_2.py"],
+  files: ["../python_files/vla_inference_2.py"],
   keepalive: true
 }
 

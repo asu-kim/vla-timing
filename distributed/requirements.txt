@@ -1,0 +1,22 @@
+# OpenVLA + JetArm pipeline dependencies
+#
+# Install PyTorch FIRST (Blackwell requires nightly cu130):
+#   pip install --pre torch torchvision torchaudio \
+#       --index-url https://download.pytorch.org/whl/nightly/cu130
+#
+# Then install these:
+
+transformers==4.40.1
+timm>=0.9.10,<1.0.0
+pillow
+accelerate
+huggingface_hub
+
+# Camera / video
+opencv-python
+
+# Numerical
+numpy
+
+# Serial (for real hardware)
+pyserial
