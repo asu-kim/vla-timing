@@ -56,8 +56,8 @@ On **both** machines:
 python3 -m venv openvla-env
 source openvla-env/bin/activate
 ```
+The server (GPU system) may need Python3.10 certain packages. Hence it is better to use that specifically:
 
-> If you need Python 3.10 specifically:
 > ```bash
 > sudo apt install python3.10 python3.10-venv
 > python3.10 -m venv openvla-env
@@ -125,6 +125,8 @@ This downloads ~15 GB. Verify it completed:
 ls ./models/openvla-7b/
 # Should include: config.json, model.safetensors.index.json, tokenizer files
 ```
+It should display something like this:
+![Files output](diagrams/files_list_model.png)
 
 > **Note:** Do not use `attn_implementation="flash_attention_2"` — it should be built properly, we are skipping it for now.
 
@@ -143,6 +145,9 @@ wget -r -np -nd -A "*.jpg,*.png" "https://rail.eecs.berkeley.edu/datasets/bridge
 ## Running
 
 `Client.lf` and `Server.lf` both default to `ip="10.218.100.78"`, `port=8080` — the server's real address. These are compile-time `main reactor` parameters, not CLI flags (the LF Python target doesn't expose runtime overrides for them), so if either machine's address changes, edit the `main reactor(...)` line at the bottom of the corresponding `.lf` file and recompile.
+
+>NOTE: The current program shows the reactor based approach, and the IP for the socket connection is hardcoded into the files. You can change it to your
+> machine and compile the programs.
 
 ### On the server (GPU / receiver) machine
 
@@ -173,9 +178,17 @@ Start the server first — the client will retry the connection until the server
 Reactor graphs for the current `Client.lf` / `Server.lf` topology (titles in the images reflect an earlier filename, `send_clnt_reactors`/`recv_serv_reactors`, but the reactor structure shown is current):
 
 **`src/Server.lf`** — `FrameListener` → `VLAInference` → `ActionSender`
-![Server.lf reactor graph](diagrams/recv_serv.png)
+
+![Server.lf reactor graph](diagrams/Server.svg)
 
 **`src/Client.lf`** — `FrameSource` ⇄ `NetworkClient` → `ActionSink`, with the action reply looped back to `FrameSource` as the trigger for the next frame
-![Client.lf reactor graph](diagrams/send_clnt.png)
+
+![Client.lf reactor graph](diagrams/Client.svg)
 
 ---
+
+## Output
+
+The output log files in the client side gives the total delay taken for the frames to be sent and the action values to be received. On the server side, a log file with the lag of the inference is also produced. The end-effector points for the robot is the final output that the client receives after sending the frames.
+
+
